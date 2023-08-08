@@ -47,14 +47,15 @@
            user-agent
            timeout
            keepalive
-           test-server]}
+           test-server
+           local-server]}
 
    api-method http-method params]
 
   (let [params
         (filter-params params)
-        
-        
+
+
 
         url
         (if test-server
@@ -62,14 +63,19 @@
                   token (name api-method))
           (format "https://api.telegram.org/bot%s/%s"
                   token (name api-method)))
-          
+
+        url
+        (if local-server
+          (format (str local-server "/bot%s/%s") token (name api-method))
+          url)
+
 
         request
         {:url url
-         
+
          :method http-method
-         
-         
+
+
          :as :stream}
 
         request
@@ -84,7 +90,7 @@
           keepalive
           (assoc :keepalive keepalive))
 
-        
+
         request
         (cond-> request
 
@@ -96,23 +102,23 @@
           (->
            (assoc-in [:headers "content-type"] "application/json")
            (assoc :body (json/generate-string params)))
-          
+
           (= :post-multipart http-method)
           (->
             (assoc-in [:headers "content-type"]   "multipart/form-data"
                                                 #_"application/json")
             (assoc :method :post)
             (assoc :multipart
-              
+
               (let [params (map filter-params (map second params))
                     ;params (filter-params params)
                     ]
                 (into
                   (for [[key value] (first params)]
-                      (try 
+                      (try
                         {:name (name key)
                          :content (json/generate-string value)}
-                        (catch Exception e 
+                        (catch Exception e
                           {:name (name key)
                            :content value
                            :filename (clojure.string/replace (str value) #"/" "")
@@ -120,10 +126,10 @@
                   (for [[key value] (second params)]
                       {:name (name key)
                        :content (str value)}))))))
-        
+
         {:keys [error status body headers]}
         @(http/request request)]
-    
+
     (if error
       (throw (ex-info (format "Telegram HTTP error: %s" (ex-message error))
                       {:api-method api-method
@@ -242,7 +248,7 @@
   "https://core.telegram.org/bots/api#sendphoto"
   ([config chat-id photo]
    (send-photo config chat-id photo nil))
-  
+
   ([config chat-id photo {:keys [message-thread-id
                                  caption
                                  parse-mode
@@ -253,12 +259,47 @@
                                  reply-to-message-id
                                  allow-sending-without-reply
                                  reply-markup]}]
-   (api-request 
+   (api-request
      config
      :sendPhoto
      :post-multipart
      [{:chat_id chat-id
        :photo photo}
+      {:message_thread_id message-thread-id
+       :caption caption
+       :parse_mode parse-mode
+       :caption_entities caption-entities
+       :has_spoiler has-spoiler
+       :disable_notification disable-notification
+       :protect_content protect-content
+       :reply_to_message_id reply-to-message-id
+       :allow_sending_without_reply allow-sending-without-reply
+       :reply_markup reply-markup}])))
+
+
+(defn send-document
+  "https://core.telegram.org/bots/api#senddocument"
+  ([config chat-id photo]
+   (send-document config chat-id document nil))
+
+  ([config chat-id document {:keys [message-thread-id
+                                    thumbnail
+                                    caption
+                                    parse-mode
+                                    caption-entities
+                                    disable-content-type-detection
+                                    disable-notification
+                                    protect-content
+                                    reply-to-message-id
+                                    allow-sending-without-reply
+                                    reply-markup]}]
+   (api-request
+     config
+     :sendDocument
+     :post-multipart
+     [{:chat_id chat-id
+       :document document
+       :thumbnail thumbnail}
       {:message_thread_id message-thread-id
        :caption caption
        :parse_mode parse-mode
@@ -279,7 +320,7 @@
                                            entities
                                            disable-web-page-preview
                                            reply-markup]}]
-   (api-request 
+   (api-request
      config
      :editMessageText
      :post
@@ -374,10 +415,10 @@
 
 (defn copy-message
   "https://core.telegram.org/bots/api#copymessage"
-  
+
   ([config chat-id from-chat-id message-id]
    (copy-message config chat-id from-chat-id message-id nil))
-  
+
   ([config chat-id from-chat-id message-id {:keys [message-thread-id
                                                    caption
                                                    parse-mode
@@ -387,7 +428,7 @@
                                                    reply-to-message-id
                                                    allow-sending-without-reply
                                                    reply-markup]}]
-   (api-request 
+   (api-request
      config
      :copyMessage
      :post
@@ -405,7 +446,7 @@
       :reply_markup reply-markup})))
 
 
-(defn get-chat 
+(defn get-chat
   "https://core.telegram.org/bots/api#getchat"
   [config chat-id]
   (api-request
@@ -421,7 +462,7 @@
                               :getFile
                               :get
                               {:file_id file-id})]
-    
+
   (conj response
         {:url (str "https://api.telegram.org/file/bot" (:token config) "/" (:file_path response))})))
 
@@ -430,12 +471,12 @@
   "https://core.telegram.org/bots/api#createchatinvitelink"
   ([config chat-id]
    (create-chat-invite-link config chat-id nil))
-  
-  ([config chat-id {:keys [link-name 
-                           expire-date 
-                           member-limit 
+
+  ([config chat-id {:keys [link-name
+                           expire-date
+                           member-limit
                            creates-join-request?]}]
-   
+
    (api-request
      config
      :createChatInviteLink
@@ -458,10 +499,10 @@
    {:token "..."
     :user-agent "Clojure 1.10.3"
     :timeout 300000
-    :keepalive 300000})
-  
-  
-  
+    :keepalive 300000
+    :local-server nil})
+
+
   (edit-message-photo
     telegram
     163440129
@@ -492,4 +533,3 @@
 
 
  )
-
