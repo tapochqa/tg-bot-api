@@ -299,12 +299,13 @@
      :post-multipart
      [{:chat_id chat-id
        :document document
-       :thumbnail thumbnail}
+       ;:thumbnail thumbnail
+       }
       {:message_thread_id message-thread-id
        :caption caption
        :parse_mode parse-mode
        :caption_entities caption-entities
-       :has_spoiler has-spoiler
+       :disable_content_type_detection disable-content-type-detection
        :disable_notification disable-notification
        :protect_content protect-content
        :reply_to_message_id reply-to-message-id
