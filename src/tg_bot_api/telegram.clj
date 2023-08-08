@@ -279,7 +279,7 @@
 
 (defn send-document
   "https://core.telegram.org/bots/api#senddocument"
-  ([config chat-id photo]
+  ([config chat-id document]
    (send-document config chat-id document nil))
 
   ([config chat-id document {:keys [message-thread-id
