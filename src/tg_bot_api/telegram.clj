@@ -6,10 +6,17 @@
   Telegram HTTP API.
   "
   (:require
-   [cheshire.core :as json]
-   [clojure.java.io :as io]
-   [clojure.string :as str]
-   [org.httpkit.client :as http]))
+
+    [cheshire.core :as json]
+
+    [clojure.java.io :as io]
+    [clojure.string :as str]
+    [clojure.spec.alpha :as spec]
+
+    [org.httpkit.client :as http]
+
+
+    ))
 
 
 (defn filter-params
@@ -40,6 +47,32 @@
         (assoc! result k v)))
     (transient {})
     params)))
+
+
+(defn file->name
+  [file]
+  (clojure.string/replace (str file) #"/" ""))
+
+
+(defn ->multipart
+  [params]
+  (let [params (map filter-params (map second params))
+                    ;params (filter-params params)
+                    ]
+
+                (into
+                  (for [[key value] (first params)]
+                      (try
+                        {:name (name key)
+                         :content (json/generate-string value)}
+                        (catch Exception e
+                          {:name (name key)
+                           :content value
+                           :filename (file->name value)
+                           })))
+                  (for [[key value] (second params)]
+                      {:name (name key)
+                       :content (str value)}))))
 
 
 (defn api-request
@@ -109,23 +142,7 @@
                                                 #_"application/json")
             (assoc :method :post)
             (assoc :multipart
-
-              (let [params (map filter-params (map second params))
-                    ;params (filter-params params)
-                    ]
-                (into
-                  (for [[key value] (first params)]
-                      (try
-                        {:name (name key)
-                         :content (json/generate-string value)}
-                        (catch Exception e
-                          {:name (name key)
-                           :content value
-                           :filename (clojure.string/replace (str value) #"/" "")
-                           })))
-                  (for [[key value] (second params)]
-                      {:name (name key)
-                       :content (str value)}))))))
+              (->multipart params))))
 
         {:keys [error status body headers]}
         @(http/request request)]
@@ -313,6 +330,121 @@
        :reply_markup reply-markup}])))
 
 
+(defn input-stream?
+  [x]
+  (= (type x) java.io.BufferedInputStream))
+(defn file?
+  [x]
+  (= (type x) java.io.File))
+
+
+(spec/def :media/type #{"photo" "video" "audio" "document"})
+
+(spec/def ::url
+  (spec/and
+       string?
+       (partial re-matches #"(?i)^http(s?)://.*")))
+
+(spec/def ::file
+  (spec/or :f file? :is input-stream?))
+
+(spec/def :media/media
+  (spec/or
+
+    :url ::url
+
+    :file ::file))
+
+(spec/def ::media
+  (spec/coll-of
+    (spec/keys
+      :req-un
+      [:media/type
+       :media/media]
+      :opt-un
+      [::caption
+       ::parse_mode
+       ::caption_entities
+       ::has_spoiler])
+    :min 2
+    :max 10))
+
+
+(defn media->multipart-ready
+  [media]
+
+  (let [files
+        (filter (fn [x]
+                  (or
+                    (= (type (:media x)) java.io.BufferedInputStream)
+                    (= (type (:media x)) java.io.File)))
+          media)
+
+        urls
+        (filter (fn [x]
+                  (spec/valid? ::url (:media x)))
+          media)
+
+
+        files'
+        (map
+          (fn [x] (assoc x :media
+                    (format "attach://%s" (file->name (:media x)))))
+          files)
+
+        files''
+        (map
+          (fn [x]
+            {(keyword (str (:media x))) (:media x)})
+          files)]
+
+    (into
+      {:media (vec (concat files' urls))}
+      files'')))
+
+
+(comment
+  (do
+    (media->multipart-ready
+    [{:type "photo"
+      :media (io/file "https://www.tema.ru/i/home=page.jpg")}
+     {:type "photo"
+      :media (io/input-stream "https://www.tema.ru/i/home=page.jpg")}
+     {:type "photo"
+      :media "https://www.tema.ru/i/home=page.jpg"}])))
+
+
+(defn send-media-group
+  "https://core.telegram.org/bots/api#sendmediagroup"
+
+  ([config chat-id media]
+   {:pre [(spec/valid? ::media media)]}
+   (send-media-group config chat-id media nil))
+  ([config chat-id media {:keys [message-thread-id
+                                 disable-notification
+                                 protect-content
+                                 reply-to-message-id
+                                 allow-sending-without-reply]}]
+
+   (api-request
+     config
+     :sendMediaGroup
+     :post-multipart
+     [(into
+        {:chat_id chat-id}
+        (media->multipart-ready media))
+      {:message_thread_id message-thread-id
+       :disable_notification disable-notification
+       :protect_content protect-content
+       :reply_to_message_id reply-to-message-id
+       :allow_sending_without_reply allow-sending-without-reply}])))
+
+
+(spec/fdef send-media-group
+  :args
+  (spec/cat :media ::media))
+
+
 (defn edit-message-text
   "https://core.telegram.org/bots/api#editmessagetext"
   ([config chat-id message-id text]
@@ -332,6 +464,28 @@
       :entities entities
       :disable_web_page_preview disable-web-page-preview
       :reply_markup reply-markup})))
+
+
+(defn edit-message-caption
+  "https://core.telegram.org/bots/api#editmessagecaption"
+  ([config chat-id message-id caption]
+   (edit-message-caption config chat-id message-id caption nil))
+
+  ([config chat-id message-id caption {:keys [parse-mode
+                                              caption-entities
+                                              reply-markup]}]
+   (api-request
+     config
+     :editMessageCaption
+     :post
+     {:chat_id chat-id
+      :message_id message-id
+      :caption caption
+      :parse_mode parse-mode
+      :caption_entities caption-entities
+      :reply_markup reply-markup})
+   )
+  )
 
 
 (defn edit-message-photo
@@ -497,12 +651,11 @@
 (comment
 
  (def telegram
-   {:token "..."
+   {:token (slurp "token")
     :user-agent "Clojure 1.10.3"
     :timeout 300000
     :keepalive 300000
     :local-server nil})
-
 
   (edit-message-photo
     telegram
@@ -511,6 +664,9 @@
     (clojure.java.io/file "target/full.png"))
 
   (get-me telegram)
+
+
+
 
  (get-updates telegram {:timeout 30 :offset 75640811})
 
@@ -532,5 +688,17 @@
 
  (restrict-user telegram -1001175355067 873472876 {:can_send_messages false})
 
+
+  (send-media-group
+    telegram
+    163440129
+    [{:type "photo"
+      :media (io/file "home=page.jpg")}
+     {:type "photo"
+      :media (io/input-stream "https://www.tema.ru/i/home=page.jpg")}
+     {:type "photo"
+      :media "https://www.tema.ru/i/home=page.jpg"}]
+
+    )
 
  )
